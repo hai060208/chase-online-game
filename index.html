@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>Online Chase Game</title>
+<style>
+    body {
+        margin: 0;
+        background: #222;
+        overflow: hidden;
+        touch-action: none;
+        font-family: sans-serif;
+    }
+    canvas {
+        background: #ccc;
+        display: block;
+        margin: 10px auto;
+        border: 3px solid #000;
+    }
+    #status {
+        text-align: center;
+        color: #fff;
+        font-size: 24px;
+        margin-top: 20px;
+    }
+    /* Joystick */
+    #joystick {
+        position: fixed;
+        bottom: 40px;
+        left: 40px;
+        width: 140px;
+        height: 140px;
+        background: rgba(255,255,255,0.15);
+        border-radius: 50%;
+        touch-action: none;
+    }
+    #stick {
+        position: absolute;
+        width: 60px;
+        height: 60px;
+        background: rgba(255,255,255,0.5);
+        border-radius: 50%;
+        left: 40px;
+        top: 40px;
+    }
+</style>
+</head>
+<body>
+
+<div id="status">Connecting to server...</div>
+<canvas id="game" width="600" height="400"></canvas>
+
+<div id="joystick">
+    <div id="stick"></div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const statusDiv = document.getElementById("status");
+
+// CHÚ Ý: Dùng io() để kết nối localhost. PHẢI THAY BẰNG URL CỦA RENDER khi deploy.
+const socket = io(); 
+
+// Dữ liệu người chơi cục bộ
+let player = {
+    x: 300, y: 200, vx: 0, vy: 0,
+    maxSpeed: 6, acceleration: 0.4, deceleration: 0.3, size: 30
+};
+
+let playersState = {};
+let myRole = '';
+let gameRunning = false;
+let gameOver = false;
+
+/* ================================== SOCKET.IO SETUP ================================== */
+
+socket.on('connect', () => {
+    statusDiv.textContent = `Connected (ID: ${socket.id}). Waiting for Role...`;
+});
+
+socket.on('playerRole', (role) => {
+    myRole = role;
+    const roleName = myRole === 'runner' ? 'Cục Vàng (CHẠY)' : 'Cục Xanh (DÍ)';
+    statusDiv.textContent = `Your Role: ${roleName} | Waiting for Opponent...`;
+    
+    player.maxSpeed = (myRole === 'runner') ? 8 : 6;
+    player.acceleration = (myRole === 'runner') ? 0.5 : 0.4;
+});
+
+socket.on('readyToStart', (msg) => {
+    statusDiv.textContent = `BẮT ĐẦU! ${myRole.toUpperCase()}!`;
+    gameRunning = true;
+});
+
+// CẬP NHẬT VỊ TRÍ TỪ SERVER
+socket.on('stateUpdate', (serverPlayers) => {
+    playersState = serverPlayers;
+    
+    if(playersState[socket.id]) {
+        player.x = playersState[socket.id].x;
+        player.y = playersState[socket.id].y;
+    }
+});
+
+socket.on('gameOver', (data) => {
+    gameOver = true;
+    gameRunning = false;
+    statusDiv.textContent = `GAME OVER! ${data.winner} wins: ${data.message}`;
+});
+
+socket.on('playerDisconnected', (id) => {
+    if (playersState[id]) delete playersState[id];
+});
+
+socket.on('fullServer', (msg) => {
+    statusDiv.textContent = msg;
+    alert(msg);
+});
+
+
+/* ================================== MOVEMENT & PHYSICS ================================== */
+
+let keys = {};
+document.addEventListener("keydown", e => keys[e.key] = true);
+document.addEventListener("keyup", e => keys[e.key] = false);
+
+function keyboardMove() {
+    let targetDx = 0, targetDy = 0; 
+    if (keys["w"] || keys["ArrowUp"]) targetDy -= 1;
+    if (keys["s"] || keys["ArrowDown"]) targetDy += 1;
+    if (keys["a"] || keys["ArrowLeft"]) targetDx -= 1;
+    if (keys["d"] || keys["ArrowRight"]) targetDx += 1;
+
+    if (targetDx !== 0 || targetDy !== 0) {
+        let len = Math.hypot(targetDx, targetDy);
+        targetDx /= len; targetDy /= len;
+        
+        player.vx += targetDx * player.acceleration;
+        player.vy += targetDy * player.acceleration;
+        
+        let currentSpeed = Math.hypot(player.vx, player.vy);
+        if (currentSpeed > player.maxSpeed) {
+            player.vx = (player.vx / currentSpeed) * player.maxSpeed;
+            player.vy = (player.vy / currentSpeed) * player.maxSpeed;
+        }
+    } else {
+        let currentSpeed = Math.hypot(player.vx, player.vy);
+        if (currentSpeed > 0) {
+            let friction = player.deceleration;
+            if (currentSpeed < friction) {
+                player.vx = 0; player.vy = 0;
+            } else {
+                player.vx -= (player.vx / currentSpeed) * friction;
+                player.vy -= (player.vy / currentSpeed) * friction;
+            }
+        }
+    }
+}
+
+function physics() {
+    player.x += player.vx;
+    player.y += player.vy;
+
+    let halfSize = player.size / 2;
+    if (player.x < halfSize) { player.x = halfSize; player.vx = 0; }
+    if (player.x > canvas.width - halfSize) { player.x = canvas.width - halfSize; player.vx = 0; }
+    if (player.y < halfSize) { player.y = halfSize; player.vy = 0; }
+    if (player.y > canvas.height - halfSize) { player.y = canvas.height - halfSize; player.vy = 0; }
+}
+
+/* ================================== JOYSTICK & DRAW ================================== */
+
+const joy = document.getElementById("joystick");
+const stick = document.getElementById("stick");
+let joyActive = false;
+const maxJoyDist = 50;
+
+joy.addEventListener("touchstart", e => { joyActive = true; });
+joy.addEventListener("touchend", e => { 
+    joyActive = false; stick.style.left = "40px"; stick.style.top = "40px";
+    player.vx = 0; player.vy = 0; // Tùy chọn: dừng hẳn khi nhả joystick
+});
+joy.addEventListener("touchmove", e => {
+    e.preventDefault(); 
+    const rect = joy.getBoundingClientRect();
+    const touch = e.touches[0];
+    let x = touch.clientX - rect.left - 70;
+    let y = touch.clientY - rect.top - 70;
+    let dist = Math.hypot(x, y);
+
+    if (dist > maxJoyDist) { x = (x / dist) * maxJoyDist; y = (y / dist) * maxJoyDist; }
+    stick.style.left = (40 + x) + "px";
+    stick.style.top = (40 + y) + "px";
+
+    const targetDx = x / maxJoyDist;
+    const targetDy = y / maxJoyDist;
+    player.vx += targetDx * player.acceleration;
+    player.vy += targetDy * player.acceleration;
+    
+    let currentSpeed = Math.hypot(player.vx, player.vy);
+    if (currentSpeed > player.maxSpeed) {
+        player.vx = (player.vx / currentSpeed) * player.maxSpeed;
+        player.vy = (player.vy / currentSpeed) * player.maxSpeed;
+    }
+});
+
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    for (let id in playersState) {
+        const p = playersState[id];
+        const isMe = (id === socket.id);
+
+        ctx.fillStyle = (p.role === 'runner') ? "yellow" : "green";
+        
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size / 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (isMe) {
+            ctx.strokeStyle = "red";
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        }
+    }
+}
+
+/* ================================== GAME LOOP ================================== */
+
+function loop() {
+    if (gameRunning && !gameOver) {
+        if (!joyActive) keyboardMove();
+        physics();
+        
+        // GỬI VỊ TRÍ MỚI LÊN SERVER
+        socket.emit('playerMovement', {
+            x: player.x,
+            y: player.y,
+            vx: player.vx,
+            vy: player.vy
+        });
+    } else {
+        if (!joyActive) keyboardMove();
+        physics();
+    }
+
+    draw();
+    requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+
+</body>
+</html>
