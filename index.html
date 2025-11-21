@@ -61,8 +61,11 @@ const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 const statusDiv = document.getElementById("status");
 
-// CHÚ Ý: Dùng io() để kết nối localhost. PHẢI THAY BẰNG URL CỦA RENDER khi deploy.
-const socket = io(); 
+// 🚨🚨🚨 ĐỊA CHỈ SERVER PUBLIC TỪ RENDER 🚨🚨🚨
+// THAY THẾ URL BÊN DƯỚI BẰNG URL CỦA BẠN (ví dụ: https://chase-game-server-abc.onrender.com)
+const socket = io("https://URL-RENDER-CUA-BAN.onrender.com"); 
+// 🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨
+
 
 // Dữ liệu người chơi cục bộ
 let player = {
